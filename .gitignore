@@ -1,0 +1,13 @@
+# Dados e artefatos nunca entram no Git (steering/tech.md, Req. 3.4 / 13.1)
+/data/
+
+# Segredos
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

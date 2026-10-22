@@ -1,0 +1,5 @@
+nome: fazenda_piloto
+geometria: configs/territorio/fazenda_piloto.geojson   # poligono da fazenda
+periodo_analise:
+  inicio: 2024-01-01
+  fim: 2025-12-31

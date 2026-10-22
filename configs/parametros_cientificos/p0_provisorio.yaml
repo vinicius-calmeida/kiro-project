@@ -1,0 +1,27 @@
+# VALORES FICTÍCIOS — apenas para desenvolvimento e teste.
+# Os valores reais da Angela nunca entram aqui (ADR-010 / Req. 13.2).
+status: provisorio
+aprovado_por: null
+colecao: ALTERE_AQUI            # sensor/coleção do BDC, a confirmar com a Angela
+bandas: [b_vermelho, b_nir, b_swir1]
+endmembers:                     # um valor por banda, na ordem de 'bandas'
+  vegetacao: [0.03, 0.45, 0.20]
+  solo:      [0.25, 0.30, 0.40]
+  sombra:    [0.01, 0.02, 0.01]
+baseline:
+  janela_inicio: 2019-01-01
+  janela_fim: 2023-12-31
+  min_obs: 20
+indice:
+  nome: indice_exemplo
+  definicao: "ver especificacao"
+limiares:
+  baixo: 0.10
+  medio: 0.25
+  alto: 0.40
+mascaras:
+  nuvem: true
+  sombra: true
+  agua: true
+  limiar_contaminacao: 0.05
+precisao_decimal: 6

@@ -1,0 +1,13 @@
+titulo: "Environmental Evidence Assessment — EC-001"
+idioma: pt-BR
+secoes:
+  - resumo
+  - resposta
+  - mapa_e_graficos
+  - metodo
+  - incerteza_e_limitacoes
+  - integridade
+logotipo: null
+texto_limitacoes: >
+  Esta evidência carrega incerteza e condições de validade explícitas. Não
+  constitui certificação nem comprovação de conformidade.
