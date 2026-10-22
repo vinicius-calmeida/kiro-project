@@ -26,14 +26,15 @@ flowchart TD
     REL --> MAN
     MAN --> IMM[(immudb - hashes)]
     EC --> STR[Streamlit - uso interno]
-    MAN -.opcional.-> S3[(S3 versionado)]
+    MAN --> S3[(S3 versionado - obrigatorio)]
+    IMM --> S3
 ```
 
 ## Módulos e responsabilidades
 
 | Módulo | Entrada | Saída | Observações |
 |---|---|---|---|
-| `config` | YAML | Modelos pydantic validados | Falha rápida e mensagens por campo |
+| `config` | YAML | Modelos pydantic validados | Falha rápida e mensagens por campo; aplica travas de uso comercial (parâmetros provisórios e termos do BDC não confirmados ⇒ EC marcado "somente desenvolvimento/validação") |
 | `coleta` | Território, bandas, período | `pixels.parquet` + metadados de origem | STAC para janelas, WTSS para séries por coordenada; retry limitado |
 | `unmixing` | `pixels.parquet`, endmembers | `fracoes.parquet` | Solver FCLS vetorizado; resíduo por pixel |
 | `features` | `fracoes.parquet` | `features.parquet` | Índice e métricas definidos nos parâmetros |
@@ -63,7 +64,7 @@ def verify_run(run_dir: Path, client: ImmudbClient) -> ResultadoVerificacao: ...
 | `lon`, `lat` | float64 | Centro do pixel |
 | `data` | date | Data da observação (ou do composto) |
 | `b_<nome>` | float32 | Uma coluna por banda necessária, em reflectância |
-| `q_nuvem`, `q_sombra`, `q_agua` | bool | Máscaras de qualidade |
+| `q_nuvem`, `q_sombra`, `q_agua` | bool | Máscaras de qualidade. `q_agua` é máscara de **exclusão**: pixels de água não entram na análise vegetal/solo do EC-001 (função explícita: evitar contaminar baseline e detecção). O limiar de contaminação que define cada máscara vem dos parâmetros, não do código |
 
 Metadados do arquivo (key-value): coleção, versão, itens (ou hash da lista de itens), consulta (geometria, período, bandas), data/hora da consulta, fatores de escala.
 
@@ -98,16 +99,24 @@ endmembers:                   # valores ficticios, apenas para teste
 baseline: {janela_inicio: 2019-01-01, janela_fim: 2023-12-31, min_obs: 20}
 indice: {nome: indice_exemplo, definicao: "ver especificacao"}
 limiares: {baixo: 0.10, medio: 0.25, alto: 0.40}     # ficticios
-mascaras: {nuvem: true, sombra: true, agua: true}
+mascaras: {nuvem: true, sombra: true, agua: true, limiar_contaminacao: 0.05}   # limiar ficticio
 ```
 
 `configs/relatorio/modelo_padrao.yaml`: título, seções, idioma, logotipo, texto de limitações.
 
 ### Evidence Card (`ec-001.json`)
 
-Objeto JSON com as 19 seções do blueprint: `pergunta`, `hipotese`, `territorio`, `periodo`, `fontes_de_dados`, `metodo`, `features`, `baseline`, `deteccao_da_mudanca`, `localizacao`, `temporalidade`, `magnitude`, `trajetoria`, `incerteza`, `nivel_de_confianca`, `conclusao`, `evidencias_utilizadas`, `rastreabilidade`, `integridade`. Campos adicionais: `status_parametros` (provisório/aprovado), `versao_ec`, `limitacoes`.
+Objeto JSON com as 19 seções do blueprint: `pergunta`, `hipotese`, `territorio`, `periodo`, `fontes_de_dados`, `metodo`, `features`, `baseline`, `deteccao_da_mudanca`, `localizacao`, `temporalidade`, `magnitude`, `trajetoria`, `incerteza`, `nivel_de_confianca`, `conclusao`, `evidencias_utilizadas`, `rastreabilidade`, `integridade`. Campos adicionais: `ec_id`, `versao_ec`, `status_parametros` (provisório/aprovado), `uso_comercial` (liberado/não liberado), `limitacoes`.
 
-Serialização canônica: chaves em ordem fixa, números arredondados à precisão declarada, UTF-8, sem espaços supérfluos. O hash SHA-256 do EC é calculado sobre essa forma.
+Identidade do EC: `ec_id` é determinístico, derivado de `(territorio, periodo, sha256(parametros), versao_metodo)`; `versao_ec` incrementa a cada mudança intencional de método. A chave de integridade usa `ec/<ec_id>@<versao_ec>`.
+
+Serialização canônica (fechada, para hash reprodutível):
+- chaves de objeto em ordem fixa declarada; listas internas ordenadas por critério determinístico documentado por campo;
+- UTF-8 com `ensure_ascii` explícito e normalização Unicode **NFC**;
+- floats formatados com a precisão declarada nos parâmetros, sem `-0.0` e sem notação científica;
+- separadores sem espaços supérfluos (`","` e `":"`).
+
+O hash SHA-256 do EC é calculado sobre exatamente essa forma.
 
 ### Manifesto (`manifest.json`)
 
@@ -128,10 +137,12 @@ Serialização canônica: chaves em ordem fixa, números arredondados à precis�
 
 - Chaves: `run/<run_id>` → hash do manifesto; `ec/<ec_id>@<versao>` → hash do EC; `relatorio/<run_id>` → hash do relatório. Valores contêm apenas hashes e metadados mínimos.
 - Gravação e leitura com as operações verificadas do SDK (confirmar a API na versão fixada); salvar o estado verificável junto da execução.
-- Volume persistente em `data/immudb/`; backup periódico (S3, se usado).
+- Volume persistente em `data/immudb/`; backup para o S3 versionado **obrigatório** (ADR-011).
 - Extensão futura: carimbo do tempo externo sobre o hash do manifesto.
 
-**Determinismo do hash de tabelas:** não hashear os bytes do Parquet (podem variar entre versões de bibliotecas); hashear o conteúdo lógico (colunas em ordem fixa, linhas ordenadas por chave, tipos fixos, floats arredondados à precisão declarada).
+**Determinismo do hash de tabelas:** não hashear os bytes do Parquet (podem variar entre versões de bibliotecas); hashear o conteúdo lógico com forma fechada — colunas em ordem fixa, linhas ordenadas pela **chave completa** (ex.: `pixel_id`, `data`) com desempate estável, tipos declarados, floats arredondados à precisão declarada antes do hash. O número de threads de cálculo (BLAS/OpenMP) é fixado (ex.: `OMP_NUM_THREADS=1`) para eliminar divergência numérica entre máquinas; o teste golden roda sob a mesma configuração.
+
+**Backup e segunda cópia (S3 obrigatório — ADR-011):** cada rodada envia manifesto, EC, parâmetros e saídas ao bucket versionado; o volume do immudb é copiado para o S3 como parte da rodada ou de rotina agendada. Falha de backup é reportada e não deixa a rodada ser considerada completa.
 
 ## Unmixing (resumo técnico)
 
@@ -159,7 +170,8 @@ Serialização canônica: chaves em ordem fixa, números arredondados à precis�
 - `Makefile`: `setup`, `lint`, `test`, `coletar`, `pipeline`, `registrar`, `relatorio`, `verificar`, `docker-build`.
 - GitHub Actions: instalar com uv, rodar ruff e pytest a cada push.
 - Imagem Docker com versões fixas; `docker compose` para o immudb local.
-- Terraform (opcional): bucket S3 com versionamento, criptografia em repouso, bloqueio de acesso público e política mínima.
+- Terraform (obrigatório — ADR-011): bucket S3 com versionamento, criptografia em repouso, bloqueio de acesso público e política mínima.
+- CI falha se detectar segredos ou arquivos de `data/` no Git; `.env.example` versionado sem valores.
 
 ## Rastreabilidade com os requisitos e ADRs
 
@@ -170,17 +182,18 @@ Serialização canônica: chaves em ordem fixa, números arredondados à precis�
 | 4 Unmixing | `unmixing` | 004, 010 |
 | 5–6 Features, baseline, detecção | `features`, `baseline`, `deteccao` | 010 |
 | 7 EC | `ec` | 006, 010 |
-| 8–9 Manifesto e integridade | `integridade` | 006 |
+| 8–9 Manifesto e integridade | `integridade` | 006, 011 |
 | 10 Relatório | `relatorio` | 007 |
 | 11 Exploração interna | Streamlit | 007 |
 | 12 Reprodutibilidade | Docker, testes golden | 003, 005, 008 |
-| 13 Segurança e IP | repositório, S3 | 003, 008, 010 |
+| 13 Segurança e IP | repositório, S3, Terraform | 003, 008, 010, 011 |
 | 14 Qualidade e governança | CI, `docs/adr` | 008 |
 
 ## Riscos e pontos em aberto
 
-- Sensor, bandas, índice e limiares dependem da Angela; até lá, parâmetros provisórios.
+- Sensor, bandas, índice e limiares dependem da Angela; até lá, parâmetros provisórios. **Trava:** EC com parâmetros provisórios é marcado "somente desenvolvimento/validação" e não vira entrega comercial sem aval explícito registrado.
 - Disponibilidade e desempenho do BDC podem variar; cachear localmente o que já foi coletado.
-- Não determinismo numérico entre máquinas (BLAS, threads): fixar configuração e usar arredondamento declarado.
-- Hash externo verificável por terceiros exige âncora externa (fora do P0).
-- Confirmar termos de uso do BDC para finalidade comercial.
+- Não determinismo numérico entre máquinas (BLAS, threads): **tratado** — threads fixadas (`OMP_NUM_THREADS=1`), arredondamento declarado antes do hash e golden sob a mesma configuração.
+- Hash externo verificável por terceiros exige âncora externa (fora do P0; ver ADR-006). O S3 obrigatório (ADR-011) dá segunda cópia versionada, mas não substitui a âncora externa.
+- **Termos de uso comercial do BDC (ADR-001) ainda não confirmados:** enquanto isso, execução para entrega comercial é bloqueada/marcada como "não liberada para uso comercial".
+- Qualidade parcial de máscara (pixels parcialmente contaminados): o limiar de contaminação vem dos parâmetros, para não introduzir número científico no código.

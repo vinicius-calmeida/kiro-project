@@ -8,7 +8,7 @@ As decisões abaixo foram tomadas pelos sócios e estão registradas em `docs/ad
 |---|---|---|
 | Fonte de dados | Brazil Data Cube (BDC), via STAC e WTSS | 001 |
 | Formato dos dados | Tabelas GeoParquet, um pixel por linha por data; sem imagens inteiras | 002 |
-| Onde roda | Local, em Docker; S3 versionado apenas como backup opcional | 003 |
+| Onde roda | Local, em Docker; S3 versionado obrigatório para backup e artefatos | 003, 011 |
 | Processamento | Python vetorizado (numpy/scipy), DuckDB/Polars para dados tabulares | 004 |
 | Orquestração | Scripts Python + Makefile + Docker | 005 |
 | Integridade | immudb (hashes) + manifesto de execução por rodada | 006 |
@@ -29,7 +29,7 @@ As decisões abaixo foram tomadas pelos sócios e estão registradas em `docs/ad
 - Ferramenta interna: **Streamlit**, rodando em `localhost`.
 - Qualidade: **pytest**, **ruff**, **pre-commit**, **GitHub Actions**.
 - Contêineres: **Docker** com imagem de versões fixas.
-- Infra opcional: **Terraform** apenas para o bucket S3 de backup (versionamento, criptografia em repouso, acesso mínimo).
+- Infra: **Terraform** para o bucket S3 obrigatório (versionamento, criptografia em repouso, bloqueio de acesso público, acesso mínimo). Ver ADR-011.
 
 ## Restrições obrigatórias
 

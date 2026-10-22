@@ -39,6 +39,7 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 4. SE a consulta falhar por indisponibilidade temporária ENTÃO o sistema DEVE tentar novamente de forma limitada e, persistindo a falha, DEVE encerrar com mensagem clara sem gravar resultado parcial como completo.
 5. QUANDO a mesma coleta é repetida com a mesma configuração ENTÃO o sistema DEVE produzir a mesma tabela, ou indicar que os dados de origem mudaram.
 6. A chave de acesso ao BDC DEVE ser lida de variável de ambiente e nunca gravada em arquivo versionado.
+7. ENQUANTO os termos de uso do BDC para finalidade comercial não forem confirmados (ADR-001), uma execução destinada a entrega comercial DEVE ser bloqueada ou marcada de forma visível como "não liberada para uso comercial"; execuções de desenvolvimento e teste permanecem liberadas.
 
 ## Requisito 3 — Armazenamento tabular
 
@@ -59,7 +60,7 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 
 1. QUANDO o unmixing é executado ENTÃO o sistema DEVE estimar, para cada pixel e data válidos, as frações de cada endmember definido nos parâmetros, com frações não negativas e somando 1.
 2. O sistema DEVE calcular e gravar, por pixel e data, uma medida de erro de reconstrução (resíduo).
-3. QUANDO o pixel estiver mascarado (nuvem, sombra, água) ENTÃO o sistema DEVE marcá-lo como inválido, sem estimar frações, e contar esses casos no resultado.
+3. QUANDO o pixel estiver mascarado (nuvem, sombra, água) ENTÃO o sistema DEVE marcá-lo como inválido, sem estimar frações, e contar esses casos no resultado. O limiar de contaminação que decide quando um pixel conta como mascarado DEVE vir do arquivo de parâmetros, nunca estar fixo no código.
 4. QUANDO o solver recebe uma mistura sintética de frações conhecidas ENTÃO o sistema DEVE recuperar essas frações dentro de uma tolerância definida nos testes.
 5. O resultado do solver DEVE concordar, em uma amostra, com uma implementação de referência (`scipy.optimize.nnls` com a restrição de soma).
 6. O sistema DEVE concluir o unmixing de uma fazenda de ~1.000 ha em tempo compatível com uso interativo em um notebook (meta a confirmar na medição).
@@ -96,6 +97,8 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 3. O EC DEVE declarar limitações e condições de validade.
 4. O EC DEVE ser serializado de forma canônica (ordem fixa de campos e arredondamento declarado) para permitir hash reprodutível.
 5. O texto do EC NÃO DEVE afirmar certificação nem comprovação de conformidade.
+6. O EC DEVE ter identidade estável: um `ec_id` determinístico derivado de (território, período, hash dos parâmetros, versão do método) e uma `versao_ec` que incrementa a cada mudança intencional de método; ambos entram na chave de registro de integridade.
+7. SE os parâmetros usados forem provisórios ENTÃO o sistema NÃO DEVE produzir um EC destinado a entrega comercial sem um aval explícito registrado (campo de aprovação de exceção); por padrão, EC com parâmetros provisórios é marcado "somente desenvolvimento/validação".
 
 ## Requisito 8 — Manifesto de execução
 
@@ -105,7 +108,8 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 
 1. QUANDO uma execução termina ENTÃO o sistema DEVE gerar um manifesto contendo: `run_id`, data e hora, hash do commit do código, hash do arquivo de parâmetros, identificação e hash dos dados de entrada, versões das dependências, hashes das saídas, hash do EC e hash do relatório.
 2. O sistema DEVE usar SHA-256.
-3. O hash de tabelas DEVE ser calculado sobre o conteúdo lógico ordenado (e não sobre os bytes do arquivo Parquet), para ser estável entre versões de bibliotecas.
+3. O hash de tabelas DEVE ser calculado sobre o conteúdo lógico ordenado (e não sobre os bytes do arquivo Parquet), para ser estável entre versões de bibliotecas. A forma lógica DEVE fixar: ordem das colunas, ordenação das linhas por chave completa e determinística (todas as colunas-chave, com desempate estável), tipos declarados, e arredondamento de floats à precisão declarada nos parâmetros antes do hash.
+4. A serialização canônica do EC (JSON) DEVE fixar: chaves em ordem fixa, listas internas ordenadas por critério determinístico, UTF-8 com `ensure_ascii` definido, normalização Unicode NFC, floats formatados com precisão declarada e sem `-0.0` nem notação científica, e ausência de espaços supérfluos. O SHA-256 é calculado sobre essa forma.
 
 ## Requisito 9 — Registro e verificação de integridade
 
@@ -116,7 +120,7 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 1. QUANDO o manifesto é gerado ENTÃO o sistema DEVE registrar no immudb o hash do manifesto, do EC e do relatório, e nunca os dados.
 2. QUANDO a verificação é executada para um EC ENTÃO o sistema DEVE recalcular os hashes dos artefatos, comparar com o manifesto e com o registro do immudb e informar, sem ambiguidade, se está íntegro ou se há divergência (apontando qual artefato).
 3. O sistema DEVE permitir salvar o estado verificável do immudb junto da execução.
-4. O volume do immudb DEVE ser persistente, com procedimento de backup.
+4. O volume do immudb DEVE ser persistente e DEVE ter backup no bucket S3 obrigatório (ver Requisito 13.3 e ADR-011) como parte de cada rodada ou de rotina agendada; a ausência de backup bem-sucedido DEVE ser reportada.
 5. O manifesto DEVE ser um arquivo com hash bem definido, apto a receber carimbo do tempo externo no futuro (fora do P0).
 
 ## Requisito 10 — Relatório
@@ -128,7 +132,7 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 1. O sistema DEVE gerar um relatório (PDF e/ou HTML estático) a partir do EC e do modelo de relatório configurado.
 2. O relatório DEVE conter: resposta às perguntas do EC (o quê, onde, quando, quanto, trajetória, em relação a quê, confiança, base), mapa e gráficos, método resumido, incerteza e limitações.
 3. O relatório DEVE exibir o hash do EC e o identificador do registro de integridade.
-4. O relatório DEVE sinalizar de forma visível quando os parâmetros forem provisórios.
+4. O relatório DEVE sinalizar de forma visível quando os parâmetros forem provisórios e quando a execução estiver marcada como "não liberada para uso comercial".
 5. O relatório NÃO DEVE usar linguagem de certificação ou de conformidade.
 
 ## Requisito 11 — Ferramenta interna de exploração
@@ -148,7 +152,7 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 **Critérios de aceite**
 
 1. QUANDO o pipeline é executado duas vezes com os mesmos dados, parâmetros e versão do código ENTÃO o sistema DEVE produzir o mesmo EC canônico e, portanto, o mesmo hash.
-2. O ambiente DEVE ser fixado por imagem Docker e lockfile de dependências; seeds e threads de cálculo DEVEM ser fixados quando houver aleatoriedade ou não determinismo numérico.
+2. O ambiente DEVE ser fixado por imagem Docker e lockfile de dependências; seeds e o número de threads de cálculo (BLAS/OpenMP, por exemplo `OMP_NUM_THREADS=1`) DEVEM ser fixados para eliminar não determinismo numérico, e o teste golden DEVE rodar sob essa mesma configuração.
 3. Um teste golden, com um mini conjunto fixo de dados, DEVE falhar se o hash do EC mudar sem mudança intencional de método.
 
 ## Requisito 13 — Segurança e propriedade intelectual
@@ -157,9 +161,11 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 
 **Critérios de aceite**
 
-1. O repositório DEVE ser privado e não conter dados, chaves nem senhas.
+1. O repositório DEVE ser privado e não conter dados, chaves nem senhas. DEVE existir um `.env.example` versionado sem valores e `data/` DEVE estar no `.gitignore`.
 2. Os valores reais dos parâmetros científicos NÃO DEVEM aparecer em steering, specs, ADRs, testes ou exemplos; esses usam valores fictícios.
-3. SE o S3 for utilizado ENTÃO o bucket DEVE ter versionamento, criptografia em repouso e acesso mínimo, e DEVE guardar apenas artefatos definidos (saídas, parâmetros, EC, manifestos, backup do immudb).
+3. A integração contínua DEVE falhar se detectar segredos ou arquivos de `data/` adicionados ao Git (verificação automática de segredos/dados).
+4. O sistema DEVE usar um bucket S3 (obrigatório no P0, ADR-011) com versionamento, criptografia em repouso, bloqueio de acesso público e política de acesso mínimo, provisionado por Terraform, guardando apenas artefatos definidos (saídas, parâmetros, EC, manifestos, backup do immudb) e nunca dados brutos nem segredos.
+5. A credencial de acesso ao S3/AWS DEVE ser lida de variável de ambiente e nunca gravada em arquivo versionado.
 
 ## Requisito 14 — Qualidade e governança
 
@@ -192,4 +198,4 @@ Este documento descreve o que o sistema deve fazer para produzir, a partir de da
 
 **Para a equipe**
 
-1. O S3 entra já no P0 ou começa sem ele?
+1. ~~O S3 entra já no P0 ou começa sem ele?~~ **Resolvido:** o S3 versionado entra no P0 como obrigatório (ADR-011).
